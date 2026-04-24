@@ -1,0 +1,30 @@
+export const colors = {
+  bgMain: "#161616",
+  bgPanel: "#1a1a1a",
+  bgCard: "#1c1c1c",
+  bgCardHover: "#222222",
+  bgElev: "#242424",
+  border: "#2a2a2a",
+  borderStrong: "#3a3a3a",
+  textMain: "#e6e6e6",
+  textDim: "#8a8a8a",
+  textFaint: "#5a5a5a",
+  accent: "#ff4d5e",
+  accentHover: "#ff6b7a",
+  accentSoft: "rgba(255, 77, 94, 0.12)",
+  statusDone: "#4ec9b0",
+  statusLate: "#d7ba7d",
+  statusMissed: "#e06060",
+  statusEarly: "#569cd6",
+  statusPending: "#4a4a4a",
+  statusIdeal: "#3a3a3a",
+} as const;
+
+export const space = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 24,
+  xxl: 32,
+} as const;

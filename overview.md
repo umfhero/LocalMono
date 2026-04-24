@@ -10,16 +10,16 @@
 
 ## App Structure
 1. **Dashboard**: Central hub for upcoming events (countdowns, overdue alerts) and active project progress bars.
-2. **God Files (.god)**: Single file type for all notes. Structured JSON array of blocks (text, table, image). Page-based layout. Supports time spans (feeds dashboard) and spreadsheet-like table editing.
+2. **Files (.file)**: Single unified file type for all notes. Structured JSON array of blocks (text, table, image, code). Page-based layout. Supports time spans (feeds dashboard) and spreadsheet-like table editing.
 3. **Quick Note**: System-wide global shortcut opening a minimal input overlay. Saves to an inbox.
 4. **Events**: Template-based quick-add (single event or project span). Includes a toggleable timetable calendar layer.
-5. **Sticky Note Mode**: Any God File can be pinned as an always-on-top, `#161616` background overlay window via Tauri.
+5. **Sticky Note Mode**: Any file can be pinned as an always-on-top, `#161616` background overlay window via Tauri.
 
 ## Data Model (Local-First)
 All data lives in flat files within a user-selected directory (intended for passive Google Drive sync).
 ```text
 /data
-  /notes/          -> .god files (JSON blocks) and quick-notes inbox
+  /notes/          -> .file notes (JSON blocks) and quick-notes inbox
   /events/         -> events.json
   /timetable/      -> timetable.json
   settings.json
