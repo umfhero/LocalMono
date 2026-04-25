@@ -53,6 +53,7 @@ function ProjectRow({ project, divider }: { project: Project; divider: boolean }
   return (
     <button
       className="lm-hoverable"
+      onClick={() => window.dispatchEvent(new CustomEvent("mono:open-project", { detail: { projectId: project.id } }))}
       style={{
         display: "grid",
         gridTemplateColumns: "auto 1fr",

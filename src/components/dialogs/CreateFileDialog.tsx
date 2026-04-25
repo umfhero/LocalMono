@@ -1,18 +1,20 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Modal, fieldLabelStyle, inputStyle, btnPrimary, btnSecondary } from "../Modal";
 import { colors } from "../../theme/tokens";
 import { useStore } from "../../store";
 
-interface Props { open: boolean; onClose: () => void; }
+interface Props { open: boolean; onClose: () => void; defaultProjectId?: string }
 
-export function CreateFileDialog({ open, onClose }: Props) {
+export function CreateFileDialog({ open, onClose, defaultProjectId }: Props) {
   const { createFile, projects } = useStore();
   const [name, setName] = useState("");
-  const [projectId, setProjectId] = useState("");
+  const [projectId, setProjectId] = useState(defaultProjectId ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const reset = () => { setName(""); setProjectId(""); setErr(null); setBusy(false); };
+  useEffect(() => { if (open) setProjectId(defaultProjectId ?? ""); }, [open, defaultProjectId]);
+
+  const reset = () => { setName(""); setProjectId(defaultProjectId ?? ""); setErr(null); setBusy(false); };
 
   const submit = async () => {
     if (!name.trim()) { setErr("Name is required"); return; }

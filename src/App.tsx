@@ -5,6 +5,8 @@ import { QuickCapture } from "./components/QuickCapture";
 import { Dashboard } from "./pages/Dashboard";
 import { FilesPage } from "./pages/Files";
 import { ProjectsPage } from "./pages/Projects";
+import { ProjectWorkspace } from "./pages/ProjectWorkspace";
+import { FileEditor } from "./pages/FileEditor";
 import { EventsPage } from "./pages/Events";
 import { SettingsPage } from "./pages/Settings";
 import { CreateProjectDialog } from "./components/dialogs/CreateProjectDialog";
@@ -41,6 +43,19 @@ function App() {
   const [createTask, setCreateTask] = useState(false);
   const [createFile, setCreateFile] = useState(false);
   const [shortcut, setShortcut] = useState(DEFAULT_SHORTCUT);
+
+  // When set, the Projects page renders ProjectWorkspace for this id instead of the list.
+  const [openProjectId, setOpenProjectId] = useState<string | null>(null);
+  // When set, the Files page renders the FileEditor instead of the list.
+  const [openFileId, setOpenFileId] = useState<string | null>(null);
+  // Per-dialog default projectId, set when a workspace fires a create-X event.
+  const [dialogDefaultProjectId, setDialogDefaultProjectId] = useState<string | undefined>(undefined);
+
+  const navigateTo = (p: Page) => {
+    if (p !== "projects") setOpenProjectId(null);
+    if (p !== "files") setOpenFileId(null);
+    setPage(p);
+  };
 
   // Track whether the current session was opened via the global shortcut.
   const shortcutInvokedRef = useRef(false);
@@ -118,46 +133,77 @@ function App() {
     setEditingEvent(null);
   };
 
-  // Cross-app create-X events from widgets / pages
+  // Cross-app create-X events from widgets / pages.
+  // CustomEvent detail may carry { projectId } to pre-fill the dialog.
   useEffect(() => {
-    const onCreateProject = () => setCreateProject(true);
-    const onCreateEvent = () => openNewEvent();
-    const onCreateTask = () => setCreateTask(true);
-    const onCreateFile = () => setCreateFile(true);
+    const pickProjectId = (e: Event): string | undefined => {
+      const d = (e as CustomEvent).detail;
+      return d && typeof d === "object" && typeof d.projectId === "string" ? d.projectId : undefined;
+    };
+    const onCreateProject = () => { setDialogDefaultProjectId(undefined); setCreateProject(true); };
+    const onCreateEvent = (e: Event) => { setDialogDefaultProjectId(pickProjectId(e)); openNewEvent(); };
+    const onCreateTask = (e: Event) => { setDialogDefaultProjectId(pickProjectId(e)); setCreateTask(true); };
+    const onCreateFile = (e: Event) => { setDialogDefaultProjectId(pickProjectId(e)); setCreateFile(true); };
     const onEditEvent = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail) openEditEvent(detail);
+    };
+    const onOpenProject = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail && typeof detail.projectId === "string") {
+        setOpenProjectId(detail.projectId);
+        setPage("projects");
+      }
+    };
+    const onOpenFile = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail && typeof detail.fileId === "string") {
+        setOpenFileId(detail.fileId);
+        setPage("files");
+      }
     };
     window.addEventListener("mono:create-project", onCreateProject);
     window.addEventListener("mono:create-event", onCreateEvent);
     window.addEventListener("mono:edit-event", onEditEvent);
     window.addEventListener("mono:create-task", onCreateTask);
     window.addEventListener("mono:create-file", onCreateFile);
+    window.addEventListener("mono:open-project", onOpenProject);
+    window.addEventListener("mono:open-file", onOpenFile);
     return () => {
       window.removeEventListener("mono:create-project", onCreateProject);
       window.removeEventListener("mono:create-event", onCreateEvent);
       window.removeEventListener("mono:edit-event", onEditEvent);
       window.removeEventListener("mono:create-task", onCreateTask);
       window.removeEventListener("mono:create-file", onCreateFile);
+      window.removeEventListener("mono:open-project", onOpenProject);
+      window.removeEventListener("mono:open-file", onOpenFile);
     };
   }, []);
 
   return (
     <div style={{ display: "flex", height: "100vh", width: "100vw", backgroundColor: colors.bgMain, color: colors.textMain }}>
-      <Sidebar active={page} onChange={setPage} />
+      <Sidebar active={page} onChange={navigateTo} />
       <main style={{ flex: 1, minWidth: 0, height: "100vh", overflow: "hidden" }}>
         {page === "dashboard" && <Dashboard />}
-        {page === "files" && <FilesPage />}
-        {page === "projects" && <ProjectsPage />}
+        {page === "files" && (
+          openFileId
+            ? <FileEditor fileId={openFileId} onBack={() => setOpenFileId(null)} />
+            : <FilesPage />
+        )}
+        {page === "projects" && (
+          openProjectId
+            ? <ProjectWorkspace projectId={openProjectId} onBack={() => setOpenProjectId(null)} />
+            : <ProjectsPage />
+        )}
         {page === "events" && <EventsPage />}
         {page === "settings" && <SettingsPage />}
       </main>
 
       <QuickCapture open={captureOpen} onClose={handleCaptureClose} />
       <CreateProjectDialog open={createProject} onClose={() => setCreateProject(false)} />
-      <EventSidePanel open={eventPanelOpen} onClose={closeEventPanel} editEvent={editingEvent} />
-      <CreateTaskDialog open={createTask} onClose={() => setCreateTask(false)} />
-      <CreateFileDialog open={createFile} onClose={() => setCreateFile(false)} />
+      <EventSidePanel open={eventPanelOpen} onClose={closeEventPanel} editEvent={editingEvent} defaultProjectId={dialogDefaultProjectId} />
+      <CreateTaskDialog open={createTask} onClose={() => setCreateTask(false)} defaultProjectId={dialogDefaultProjectId} />
+      <CreateFileDialog open={createFile} onClose={() => setCreateFile(false)} defaultProjectId={dialogDefaultProjectId} />
     </div>
   );
 }

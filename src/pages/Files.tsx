@@ -119,7 +119,7 @@ function FileRow({
     >
       <FileText size={14} style={{ color: proj?.color ?? colors.textDim }} />
       <button
-        onClick={() => alert("Open file — Phase 4 wires the editor")}
+        onClick={() => window.dispatchEvent(new CustomEvent("mono:open-file", { detail: { fileId: file.id } }))}
         style={{ textAlign: "left", color: colors.textMain, fontSize: 13, display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}
       >
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.name}</span>

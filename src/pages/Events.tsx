@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
-import { Plus, Trash2, MapPin, Repeat, Clock } from "lucide-react";
+import { Plus, Trash2, MapPin, Repeat, Clock, Sparkles, AlertTriangle } from "lucide-react";
 import { colors } from "../theme/tokens";
 import { useStore } from "../store";
 import { LinearCalendar } from "../widgets/LinearCalendar";
+import * as api from "../api";
+import { EVENT_NLP_SYSTEM, buildEventNlpPrompt, parseEventJson } from "../llm/prompts";
 import type { CalendarEvent } from "../api";
 
 const TYPE_ICON: Record<string, React.ReactNode> = {
@@ -13,8 +15,11 @@ const TYPE_ICON: Record<string, React.ReactNode> = {
 };
 
 export function EventsPage() {
-  const { events, projects, deleteEvent, backed } = useStore();
+  const { events, projects, deleteEvent, createEvent, config, backed } = useStore();
   const [filter, setFilter] = useState<"upcoming" | "all" | "past">("upcoming");
+  const [nlpText, setNlpText] = useState("");
+  const [nlpBusy, setNlpBusy] = useState(false);
+  const [nlpErr, setNlpErr] = useState<string | null>(null);
 
   const projectMap = Object.fromEntries(projects.map((p) => [p.id, p]));
 
@@ -32,6 +37,40 @@ export function EventsPage() {
 
   const fireCreate = () => window.dispatchEvent(new CustomEvent("mono:create-event"));
   const fireEdit = (event: CalendarEvent) => window.dispatchEvent(new CustomEvent("mono:edit-event", { detail: event }));
+
+  const submitNlp = async () => {
+    const text = nlpText.trim();
+    if (!text) return;
+    if (!config.ollamaModel) {
+      setNlpErr("No Ollama model configured. Set one in Settings → Local AI.");
+      return;
+    }
+    setNlpBusy(true);
+    setNlpErr(null);
+    try {
+      const healthy = await api.ollamaHealth();
+      if (!healthy) throw new Error("Ollama daemon unreachable on localhost:11434");
+
+      const raw = await api.ollamaGenerate({
+        model: config.ollamaModel,
+        system: EVENT_NLP_SYSTEM,
+        prompt: buildEventNlpPrompt(text),
+      });
+      const parsed = parseEventJson(raw);
+      await createEvent({
+        title: parsed.title,
+        start: new Date(parsed.startISO).toISOString(),
+        end: new Date(parsed.endISO).toISOString(),
+        type: parsed.type,
+        location: parsed.location ?? undefined,
+      });
+      setNlpText("");
+    } catch (e) {
+      setNlpErr(String(e));
+    } finally {
+      setNlpBusy(false);
+    }
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -59,6 +98,48 @@ export function EventsPage() {
           <Plus size={13} /> New event
         </button>
       </header>
+
+      <div style={{
+        padding: "10px 24px", borderBottom: `1px solid ${colors.border}`,
+        display: "flex", flexDirection: "column", gap: 6,
+      }}>
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8,
+          padding: "6px 10px", borderRadius: 5,
+          background: colors.bgPanel, border: `1px solid ${nlpErr ? colors.statusMissed : colors.border}`,
+        }}>
+          <Sparkles size={13} style={{ color: colors.accent, flexShrink: 0 }} />
+          <input
+            value={nlpText}
+            onChange={(e) => { setNlpText(e.target.value); setNlpErr(null); }}
+            onKeyDown={(e) => { if (e.key === "Enter") submitNlp(); }}
+            placeholder='Try: "add weekly social Friday 5pm at the Anchor" — Ollama parses → event'
+            disabled={nlpBusy}
+            style={{ flex: 1, fontSize: 12, color: colors.textMain }}
+          />
+          <button
+            onClick={submitNlp}
+            disabled={nlpBusy || !nlpText.trim()}
+            style={{
+              padding: "4px 10px", borderRadius: 4, fontSize: 11, fontWeight: 500,
+              color: colors.bgMain, backgroundColor: colors.accent,
+              opacity: (nlpBusy || !nlpText.trim()) ? 0.5 : 1,
+              cursor: (nlpBusy || !nlpText.trim()) ? "not-allowed" : "pointer",
+            }}
+          >
+            {nlpBusy ? "parsing…" : "Add"}
+          </button>
+        </div>
+        {nlpErr && (
+          <div style={{
+            display: "flex", alignItems: "flex-start", gap: 5,
+            fontSize: 11, color: colors.statusMissed, lineHeight: 1.4,
+          }}>
+            <AlertTriangle size={11} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>{nlpErr}</span>
+          </div>
+        )}
+      </div>
 
       <div style={{ padding: 16, borderBottom: `1px solid ${colors.border}`, height: 200, flexShrink: 0 }}>
         <LinearCalendar onEventClick={fireEdit} />

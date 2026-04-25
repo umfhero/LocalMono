@@ -30,6 +30,7 @@ export function RecentFiles() {
           return (
             <button
               key={f.id}
+              onClick={() => window.dispatchEvent(new CustomEvent("mono:open-file", { detail: { fileId: f.id } }))}
               className="lm-hoverable"
               style={{
                 display: "grid",

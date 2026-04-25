@@ -6,11 +6,6 @@ import type { CalendarEvent } from "../../api";
 
 const COLORS = ["#ff4d5e", "#4fc1ff", "#4ec9b0", "#d7ba7d", "#c586c0", "#569cd6", "#e06060", "#9cdcfe"];
 
-function toLocalInput(iso: string): string {
-  const d = new Date(iso);
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-  return d.toISOString().slice(0, 16);
-}
 function toDateInput(iso: string): string {
   return new Date(iso).toISOString().slice(0, 10);
 }
@@ -31,9 +26,10 @@ interface Props {
   open: boolean;
   onClose: () => void;
   editEvent?: CalendarEvent | null; // if set, we're editing
+  defaultProjectId?: string;
 }
 
-export function EventSidePanel({ open, onClose, editEvent }: Props) {
+export function EventSidePanel({ open, onClose, editEvent, defaultProjectId }: Props) {
   const { createEvent, updateEvent, projects } = useStore();
   const isEditing = !!editEvent;
 
@@ -70,12 +66,12 @@ export function EventSidePanel({ open, onClose, editEvent }: Props) {
       setEndDate(nowDate());
       setEndTime(nowTimePlus(1));
       setColor(COLORS[0]);
-      setProjectId("");
+      setProjectId(defaultProjectId ?? "");
       setLocation("");
     }
     setErr(null);
     setBusy(false);
-  }, [open, editEvent]);
+  }, [open, editEvent, defaultProjectId]);
 
   const buildISO = (date: string, time: string) => {
     return new Date(`${date}T${time}:00`).toISOString();

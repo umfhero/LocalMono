@@ -175,6 +175,43 @@ export async function deleteFile(id: string): Promise<void> {
   return call<void>("delete_file", { id });
 }
 
+// Block-document persistence (Phase 4 editor).
+// The doc shape is owned by the frontend (see src/editor/blocks.ts).
+export async function readFileDoc(id: string): Promise<unknown> {
+  return call<unknown>("read_file_doc", { id });
+}
+
+export async function saveFileDoc(input: { id: string; doc: unknown; preview?: string }): Promise<void> {
+  const args: Record<string, unknown> = { id: input.id, doc: input.doc };
+  if (input.preview !== undefined) args.preview = input.preview;
+  return call<void>("save_file_doc", args);
+}
+
+// Pasted images get sent to Rust as base64 + extension; Rust writes them under
+// `assets/<projectId or "global">/<uuid>.<ext>` and returns the relative path the doc stores.
+export async function saveAsset(input: { projectId?: string; extension: string; base64: string }): Promise<string> {
+  const args: Record<string, unknown> = { extension: input.extension, base64: input.base64 };
+  if (input.projectId) args.projectId = input.projectId;
+  return call<string>("save_asset", args);
+}
+
+export async function readAsset(relPath: string): Promise<string> {
+  return call<string>("read_asset", { relPath });
+}
+
+// ---------- Ollama ----------
+
+export async function ollamaHealth(): Promise<boolean> {
+  if (!runningInTauri) return false;
+  return call<boolean>("ollama_health");
+}
+
+export async function ollamaGenerate(input: { model: string; prompt: string; system?: string }): Promise<string> {
+  const args: Record<string, unknown> = { model: input.model, prompt: input.prompt };
+  if (input.system) args.system = input.system;
+  return call<string>("ollama_generate", args);
+}
+
 // ---------- Inbox / Quick Capture ----------
 
 export async function listInbox(): Promise<InboxEntry[]> {

@@ -224,6 +224,64 @@ fn set_capture_shortcut(
     Ok(state.config.lock().unwrap().clone())
 }
 
+// ---------- Commands: ollama ----------
+//
+// Talks to a local Ollama daemon at http://localhost:11434.
+// `ollama_health` returns true if the daemon answers; `ollama_generate`
+// runs a one-shot non-streaming generation and returns the full response.
+
+const OLLAMA_BASE: &str = "http://localhost:11434";
+
+#[tauri::command]
+async fn ollama_health() -> bool {
+    match reqwest::Client::new()
+        .get(format!("{OLLAMA_BASE}/api/tags"))
+        .timeout(std::time::Duration::from_millis(800))
+        .send()
+        .await
+    {
+        Ok(r) => r.status().is_success(),
+        Err(_) => false,
+    }
+}
+
+#[tauri::command]
+async fn ollama_generate(
+    model: String,
+    prompt: String,
+    system: Option<String>,
+) -> Result<String, String> {
+    if model.trim().is_empty() {
+        return Err("ollama model not configured".to_string());
+    }
+    let mut body = serde_json::json!({
+        "model": model,
+        "prompt": prompt,
+        "stream": false,
+    });
+    if let Some(s) = system {
+        body["system"] = serde_json::Value::String(s);
+    }
+    let resp = reqwest::Client::new()
+        .post(format!("{OLLAMA_BASE}/api/generate"))
+        .timeout(std::time::Duration::from_secs(60))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("ollama unreachable: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("ollama HTTP {status}: {text}"));
+    }
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(json
+        .get("response")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string())
+}
+
 // ---------- Commands: projects ----------
 
 #[tauri::command]
@@ -444,6 +502,149 @@ fn delete_file(id: String, state: State<AppState>) -> Result<(), String> {
     write_json(&index_path, &list)
 }
 
+/// Returns the raw block-document JSON for a file. Shape is owned by the frontend
+/// (see src/editor/blocks.ts) — Rust only stores it.
+#[tauri::command]
+fn read_file_doc(id: String, state: State<AppState>) -> Result<serde_json::Value, String> {
+    let dir = data_dir(&state)?;
+    let path = dir.join("files").join(format!("{id}.json"));
+    if !path.exists() {
+        // Brand-new file — return an empty doc the editor knows how to handle.
+        return Ok(serde_json::json!({ "id": id, "blocks": [] }));
+    }
+    let raw = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&raw).map_err(|e| e.to_string())
+}
+
+/// Writes the document JSON and updates `modified_at` + `preview` in the file index.
+#[tauri::command]
+fn save_file_doc(
+    id: String,
+    doc: serde_json::Value,
+    preview: Option<String>,
+    state: State<AppState>,
+) -> Result<(), String> {
+    let dir = data_dir(&state)?;
+    let files_dir = dir.join("files");
+    fs::create_dir_all(&files_dir).map_err(|e| e.to_string())?;
+    let doc_path = files_dir.join(format!("{id}.json"));
+    fs::write(
+        &doc_path,
+        serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+
+    let index_path = files_dir.join("index.json");
+    let mut list: Vec<FileSummary> = read_json(&index_path);
+    for f in list.iter_mut() {
+        if f.id == id {
+            f.modified_at = now_iso();
+            if let Some(p) = &preview {
+                f.preview = Some(p.clone());
+            }
+        }
+    }
+    write_json(&index_path, &list)
+}
+
+/// Saves a base64-encoded asset (typically a pasted image) under
+/// `<data_dir>/assets/<projectId or "global">/<uuid>.<ext>`.
+/// Returns a relative path the editor stores in the doc and resolves at render time
+/// via `read_asset`.
+#[tauri::command]
+fn save_asset(
+    project_id: Option<String>,
+    extension: String,
+    base64: String,
+    state: State<AppState>,
+) -> Result<String, String> {
+    use base64_decode_compat as decode;
+    let dir = data_dir(&state)?;
+    let bucket = project_id.as_deref().unwrap_or("global");
+    let safe_bucket: String = bucket.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
+    let safe_ext: String = extension
+        .trim_start_matches('.')
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(8)
+        .collect();
+    let target_dir = dir.join("assets").join(&safe_bucket);
+    fs::create_dir_all(&target_dir).map_err(|e| e.to_string())?;
+    let id = new_id();
+    let filename = if safe_ext.is_empty() { id.clone() } else { format!("{id}.{safe_ext}") };
+    let bytes = decode(&base64).map_err(|e| format!("base64 decode: {e}"))?;
+    fs::write(target_dir.join(&filename), bytes).map_err(|e| e.to_string())?;
+    Ok(format!("assets/{safe_bucket}/{filename}"))
+}
+
+/// Reads an asset back as base64 so the renderer can put it in an `<img src="data:...">`.
+/// We don't expose the data dir over a custom protocol; round-tripping through base64
+/// keeps the asset pipeline isolated to Tauri commands.
+#[tauri::command]
+fn read_asset(rel_path: String, state: State<AppState>) -> Result<String, String> {
+    let dir = data_dir(&state)?;
+    // Reject path traversal attempts.
+    if rel_path.contains("..") || rel_path.starts_with('/') || rel_path.starts_with('\\') {
+        return Err("invalid asset path".to_string());
+    }
+    let path = dir.join(&rel_path);
+    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+    Ok(base64_encode_compat(&bytes))
+}
+
+/* Tiny base64 codec — avoids pulling the `base64` crate just for two helpers. */
+
+fn base64_decode_compat(s: &str) -> Result<Vec<u8>, String> {
+    let table: [i16; 256] = {
+        let mut t = [-1i16; 256];
+        let alpha = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut i = 0;
+        while i < alpha.len() {
+            t[alpha[i] as usize] = i as i16;
+            i += 1;
+        }
+        t
+    };
+    let bytes: Vec<u8> = s.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+    if bytes.len() % 4 != 0 { return Err("bad length".into()); }
+    let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
+    for chunk in bytes.chunks(4) {
+        let n0 = if chunk[0] == b'=' { 0 } else { table[chunk[0] as usize] };
+        let n1 = if chunk[1] == b'=' { 0 } else { table[chunk[1] as usize] };
+        let n2 = if chunk[2] == b'=' { 0 } else { table[chunk[2] as usize] };
+        let n3 = if chunk[3] == b'=' { 0 } else { table[chunk[3] as usize] };
+        if n0 < 0 || n1 < 0 || n2 < 0 || n3 < 0 { return Err("bad char".into()); }
+        let v = ((n0 as u32) << 18) | ((n1 as u32) << 12) | ((n2 as u32) << 6) | (n3 as u32);
+        out.push(((v >> 16) & 0xff) as u8);
+        if chunk[2] != b'=' { out.push(((v >> 8) & 0xff) as u8); }
+        if chunk[3] != b'=' { out.push((v & 0xff) as u8); }
+    }
+    Ok(out)
+}
+
+fn base64_encode_compat(bytes: &[u8]) -> String {
+    let alpha = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = if chunk.len() > 1 { chunk[1] } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] } else { 0 };
+        out.push(alpha[(b0 >> 2) as usize] as char);
+        out.push(alpha[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(alpha[(((b1 & 0x0f) << 2) | (b2 >> 6)) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(alpha[(b2 & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
+}
+
 // ---------- Commands: quick capture inbox ----------
 
 #[tauri::command]
@@ -532,8 +733,14 @@ pub fn run() {
             list_files,
             create_file,
             delete_file,
+            read_file_doc,
+            save_file_doc,
+            save_asset,
+            read_asset,
             list_inbox,
             quick_capture_save,
+            ollama_health,
+            ollama_generate,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

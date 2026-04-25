@@ -103,3 +103,12 @@ a { color: var(--accent); text-decoration: none; }
 /* Subtle hover lift utility */
 .lm-hoverable { transition: background-color var(--t-fast), border-color var(--t-fast); }
 .lm-hoverable:hover { background-color: var(--bg-card-hover); }
+
+@keyframes lm-spin { to { transform: rotate(360deg); } }
+
+/* contentEditable placeholder for the block editor */
+[contenteditable][data-placeholder]:empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-faint);
+  pointer-events: none;
+}

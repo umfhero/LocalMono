@@ -41,7 +41,14 @@ export function ProjectsPage() {
           display: "grid", gap: 12,
           gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
         }}>
-          {projects.map((p) => <ProjectCard key={p.id} project={p} onDelete={() => deleteProject(p.id)} />)}
+          {projects.map((p) => (
+            <ProjectCard
+              key={p.id}
+              project={p}
+              onDelete={() => deleteProject(p.id)}
+              onOpen={() => window.dispatchEvent(new CustomEvent("mono:open-project", { detail: { projectId: p.id } }))}
+            />
+          ))}
           {projects.length === 0 && (
             <div style={{ color: colors.textFaint, fontSize: 13, padding: 16 }}>
               No projects yet. Hit <strong>+ New project</strong> to start one.
@@ -53,7 +60,7 @@ export function ProjectsPage() {
   );
 }
 
-function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => void }) {
+function ProjectCard({ project, onDelete, onOpen }: { project: Project; onDelete: () => void; onOpen: () => void }) {
   const Icon = (Lucide as any)[project.icon] ?? Lucide.Box;
   const start = new Date(project.start).getTime();
   const end = new Date(project.end).getTime();
@@ -63,13 +70,20 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
   const totalDays = Math.max(1, Math.ceil((end - start) / 86400000));
 
   return (
-    <div style={{
-      position: "relative",
-      backgroundColor: colors.bgCard,
-      border: `1px solid ${colors.border}`,
-      borderRadius: 8, padding: 14,
-      display: "flex", flexDirection: "column", gap: 10,
-    }}>
+    <div
+      onClick={onOpen}
+      style={{
+        position: "relative",
+        backgroundColor: colors.bgCard,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 8, padding: 14,
+        display: "flex", flexDirection: "column", gap: 10,
+        cursor: "pointer",
+        transition: "border-color 100ms, background-color 100ms",
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.borderColor = colors.borderStrong; e.currentTarget.style.backgroundColor = colors.bgCardHover; }}
+      onMouseLeave={(e) => { e.currentTarget.style.borderColor = colors.border; e.currentTarget.style.backgroundColor = colors.bgCard; }}
+    >
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div style={{
           width: 34, height: 34, borderRadius: 6,
@@ -88,7 +102,7 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
           </div>
         </div>
         <button
-          onClick={onDelete}
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
           title="Delete"
           style={{
             color: colors.textFaint, padding: 4, borderRadius: 4,

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Modal, fieldLabelStyle, inputStyle, btnPrimary, btnSecondary } from "../Modal";
 import { colors } from "../../theme/tokens";
 import { useStore } from "../../store";
@@ -10,17 +10,19 @@ const isoLocalEod = () => {
   return d.toISOString().slice(0, 16);
 };
 
-interface Props { open: boolean; onClose: () => void; }
+interface Props { open: boolean; onClose: () => void; defaultProjectId?: string }
 
-export function CreateTaskDialog({ open, onClose }: Props) {
+export function CreateTaskDialog({ open, onClose, defaultProjectId }: Props) {
   const { createTask, projects } = useStore();
   const [title, setTitle] = useState("");
   const [due, setDue] = useState(isoLocalEod());
-  const [projectId, setProjectId] = useState("");
+  const [projectId, setProjectId] = useState(defaultProjectId ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const reset = () => { setTitle(""); setDue(isoLocalEod()); setProjectId(""); setErr(null); setBusy(false); };
+  useEffect(() => { if (open) setProjectId(defaultProjectId ?? ""); }, [open, defaultProjectId]);
+
+  const reset = () => { setTitle(""); setDue(isoLocalEod()); setProjectId(defaultProjectId ?? ""); setErr(null); setBusy(false); };
 
   const submit = async () => {
     if (!title.trim()) { setErr("Title is required"); return; }
