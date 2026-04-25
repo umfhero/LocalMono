@@ -3,6 +3,7 @@ import * as Lucide from "lucide-react";
 import { ArrowLeft, Plus, Trash2, FileText, MapPin, Repeat, Clock, CheckCircle2, Circle } from "lucide-react";
 import { colors } from "../theme/tokens";
 import { useStore } from "../store";
+import { urgencyOf, urgencyLabel, urgencyColor } from "../editor/taskUrgency";
 import type { CalendarEvent, FileSummary, Task } from "../api";
 
 interface Props {
@@ -314,11 +315,13 @@ function EventRow({ event, accent, onEdit, onDelete }: { event: CalendarEvent; a
 
 function TaskRow({ task, onToggle, onDelete }: { task: Task; onToggle: () => void; onDelete: () => void }) {
   const done = task.status === "done" || task.status === "early";
-  const overdue = !done && new Date(task.due).getTime() < Date.now();
-  const dueColor = done ? colors.statusDone : overdue ? colors.statusMissed : colors.textDim;
+  const u = urgencyOf(task);
+  const label = done ? null : urgencyLabel(u, task);
+  const c = urgencyColor(u);
+  const dueColor = done ? colors.statusDone : u === "overdue" ? colors.statusMissed : colors.textDim;
   return (
     <div className="lm-hoverable" style={{
-      display: "grid", gridTemplateColumns: "auto 1fr auto auto",
+      display: "grid", gridTemplateColumns: "auto 1fr auto auto auto",
       alignItems: "center", gap: 8,
       padding: "8px 14px",
       borderBottom: `1px solid ${colors.border}`,
@@ -336,8 +339,19 @@ function TaskRow({ task, onToggle, onDelete }: { task: Task; onToggle: () => voi
       }}>
         {task.title}
       </span>
+      {label ? (
+        <span style={{
+          fontSize: 9, fontWeight: 600,
+          color: c, background: `${c}1f`,
+          border: `1px solid ${c}55`,
+          padding: "1px 5px", borderRadius: 3,
+          letterSpacing: 0.4,
+        }}>
+          {label}
+        </span>
+      ) : <span />}
       <span style={{ fontSize: 10, color: dueColor, fontFamily: "var(--font-data)" }}>
-        {new Date(task.due).toLocaleDateString("en", { day: "numeric", month: "short" })}
+        {new Date(task.due).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
       </span>
       <button onClick={onDelete} title="Delete" style={{ color: colors.textFaint, padding: 3 }}
         onMouseEnter={(e) => (e.currentTarget.style.color = colors.statusMissed)}

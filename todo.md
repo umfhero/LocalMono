@@ -4,6 +4,19 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` pending
 
 ---
 
+## Outstanding from notes.md (next round)
+- [x] Sidebar: bigger icons (26px), wider expand width (200px) and proximity-based expand (cursor within 80px of left edge triggers it; only collapses once cursor moves past the expanded width)
+- [x] Project page: bigger cards (min 360px wide, min 200px tall), file count + done/total task count chips, Tasks progress bar replaces synthetic Activity, time bar still shown; description clamped to 2 lines
+- [x] Briefing: UK English, no hyphens/em-dashes; sections for completed / upcoming / missed; auto-regen on store change
+- [x] Code cells: pre-installed languages Python / JavaScript / Java + Shell + custom; toolbar at top; Run + output; syntax colouring per language
+- [x] Code panel split-screen toggle
+- [x] File page wider content area, less margin
+- [x] Image: click to lightbox, corner-drag resize
+- [ ] **Click task in project workspace → open task note**: tasks currently have no associated note file. Plan: add `note_file_id` to Task; on first click create or open the note file linked to the task via the editor. Touches Rust `Task` struct, `toggle_task` / `create_task` commands, `ProjectWorkspace.tsx` task row, `FileEditor.tsx` route. Defer until after image-edit canvas
+- [ ] **Image editing canvas (drawing, text, cropping, free positioning on the page)**: a real drawable image editor is a substantial subsystem. Plan: side-panel canvas backed by a `fabric.js`-style layer system or a custom small wrapper around `<canvas>`; commit edited PNG back to the asset; layered annotations stored in the block alongside `assetPath`. Cropping = re-encode and replace asset. Free positioning = absolute layout layer for the doc. Treat as Phase 4.5
+
+---
+
 ## Phase 1 — UI restart (DONE)
 - [x] Dark VSCode shell, sidebar, routing
 - [x] Draggable/resizable widget grid with layout persistence
@@ -82,7 +95,15 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` pending
 - [x] Project workspace view: click a project (Projects page card or ActiveProjects widget row) → three-column workspace with linked files / events / tasks; per-section "+ Add" pre-fills the projectId in the create dialog; "← Projects" back button; cross-app `mono:open-project` event opens any project from anywhere
 - [ ] Folders / project nesting — next iteration
 
-## Phase 4 — Unified note editor (MVP DONE)
+## Phase 4 — Unified note editor (MVP DONE + polish round)
+
+**Polish round (notes.md feedback):**
+- [x] Editor content area widened: max-width 1100 (was 720), 36px gutter; in split-screen mode the column flexes
+- [x] Code cells overhaul: top toolbar with Python / JavaScript / Java / Shell preset language tabs + a custom-language input. Run button executes via `run_code` (Rust spawns system runtime). Output panel shows stdout/stderr/exit/duration. Browser-mode JS falls back to a `new Function` sandbox so it still works without Tauri
+- [x] Syntax highlighting (`src/editor/highlight.ts`): tiny regex-based tokeniser (no deps) for Python, JS/TS, Java, Shell — keywords, strings, comments, numbers, function names, type names. Rendered as a `<pre>` overlay behind a transparent `<textarea>` so caret + selection still work. CSS classes `.lm-syn-*` in index.css; tweak colours there
+- [x] Code panel split-screen toggle: a `Columns2` icon in the toolbar swaps between docked-right (480px) and split-screen (50/50)
+- [x] Image: click any image to open a fullscreen lightbox (Esc closes); bottom-right corner drag handle resizes between 20–100% of column width; current width shown as a `%` chip in the bottom-left
+
 - [x] Page-based block document (`src/editor/blocks.ts`): paragraph / heading (h1-h3) / image / code variants. Stored as JSON at `<data_dir>/files/<id>.json` via Rust `read_file_doc` + `save_file_doc` (saves preview + bumps modifiedAt). Frontend coerces malformed docs.
 - [x] FileEditor page (`src/pages/FileEditor.tsx`) opens via `mono:open-file` event from Files page, ProjectWorkspace file rows, and dashboard RecentFiles widget. Auto-save 600ms debounce with idle/saving/saved/error indicator.
 - [x] Slash menu: type `/` at the start of a block → menu with Paragraph / H1 / H2 / H3 / Code / Image options. Enter creates new paragraph; Backspace on empty block deletes it.
@@ -114,7 +135,8 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` pending
 - [x] Global shortcut config (keyboard via `tauri-plugin-global-shortcut`); editable in Settings; persists to config; hot-swap registration
 - [ ] Mouse side-button binding (browsers/Tauri don't expose extra mouse buttons through `KeyboardEvent` — needs raw input handling)
 - [x] Ollama integration: Rust `ollama_health` + `ollama_generate` commands (reqwest, non-streaming, 60s timeout) hitting `localhost:11434`; frontend wrappers in `api.ts`; uses `config.ollamaModel`
-- [x] Briefing widget wired to Ollama: assembles structured context (active projects, tasks due today, overdue, upcoming events for next 7 days) into a prompt; renders 2-paragraph plain-text briefing; refresh button; loading spinner; falls back to mock briefings + warning banner when no model is set, the daemon is unreachable, or running in browser mode
-- [ ] Multiple briefing generators (day, week, projects, university) — currently single "today" briefing; multi-section UI is next
+- [x] Briefing widget v2: British English; structured into completed (last 7 days), upcoming today, upcoming this week, upcoming events, missed/overdue, and per-project task progress (done/total + %); auto-regenerates on store changes (debounced 800ms) so toggling a task or creating an event refreshes the brief live; system message bans hyphens, em/en dashes, markdown
+- [ ] Multiple briefing generators (day, week, projects, university) — currently single rolling briefing; per-section pages are next
+- [x] Code execution (Phase 4 split-out): Rust `run_code` command spawns system runtimes for python (python3 / python), javascript (node), java (javac + java), and shell (bash -lc / cmd /C); writes source to a temp file in `<temp>/mono-runs/<id>/`; output captured as `{ stdout, stderr, exitCode, durationMs }`; Run button in the code side panel; browser mode falls back to in-page JS sandbox (`new Function`) for JavaScript only
 - [ ] Auto-file quick captures into last-opened project
 - [ ] Auto-surface TODO lines in notes as tasks

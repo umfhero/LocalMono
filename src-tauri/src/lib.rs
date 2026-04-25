@@ -224,6 +224,210 @@ fn set_capture_shortcut(
     Ok(state.config.lock().unwrap().clone())
 }
 
+// ---------- Commands: code execution ----------
+//
+// Runs a code snippet via a system-installed runtime. Each language writes the
+// source to a temp file (so multi-line scripts work cleanly) and spawns the
+// runtime with a 15-second timeout. Output is captured and returned as
+// `{ stdout, stderr, exitCode, durationMs }` for the editor to render.
+//
+// Supported languages: python (python3 / python), javascript (node), java (javac + java).
+// "shell" routes to `bash -lc` on macOS/Linux and `cmd /C` on Windows for power users.
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RunOutput {
+    stdout: String,
+    stderr: String,
+    exit_code: Option<i32>,
+    duration_ms: u128,
+}
+
+#[tauri::command]
+async fn run_code(language: String, source: String) -> Result<RunOutput, String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    use std::time::Instant;
+
+    let lang = language.trim().to_lowercase();
+    let started = Instant::now();
+
+    // Per-run temp directory.
+    let tmp_root = std::env::temp_dir().join("mono-runs");
+    fs::create_dir_all(&tmp_root).map_err(|e| e.to_string())?;
+    let run_id = new_id();
+    let work_dir = tmp_root.join(&run_id);
+    fs::create_dir_all(&work_dir).map_err(|e| e.to_string())?;
+
+    let result: Result<std::process::Output, String> = match lang.as_str() {
+        "python" | "py" => {
+            let path = work_dir.join("main.py");
+            fs::File::create(&path)
+                .and_then(|mut f| f.write_all(source.as_bytes()))
+                .map_err(|e| e.to_string())?;
+            // Candidate runtimes. On Windows we try `py` (Python launcher) FIRST
+            // because `python` and `python3` are usually the Microsoft Store
+            // app-execution-alias stubs that exit 9009 with no Python installed.
+            #[cfg(target_os = "windows")]
+            let candidates: &[(&str, &[&str])] = &[
+                ("py", &["-3"]),
+                ("python3", &[]),
+                ("python", &[]),
+            ];
+            #[cfg(not(target_os = "windows"))]
+            let candidates: &[(&str, &[&str])] = &[
+                ("python3", &[]),
+                ("python", &[]),
+            ];
+            try_candidates(candidates, &path, "Python")
+        }
+        "javascript" | "js" | "node" => {
+            let path = work_dir.join("main.js");
+            fs::File::create(&path)
+                .and_then(|mut f| f.write_all(source.as_bytes()))
+                .map_err(|e| e.to_string())?;
+            try_candidates(&[("node", &[])], &path, "Node.js")
+        }
+        "java" => {
+            // The public class must match the filename, so extract it from the source.
+            let class_name = extract_java_class(&source).unwrap_or_else(|| "Main".to_string());
+            let src_path = work_dir.join(format!("{class_name}.java"));
+            fs::File::create(&src_path)
+                .and_then(|mut f| f.write_all(source.as_bytes()))
+                .map_err(|e| e.to_string())?;
+            // Compile, then run.
+            let compile = Command::new("javac")
+                .current_dir(&work_dir)
+                .arg(&src_path)
+                .stdout(Stdio::piped()).stderr(Stdio::piped())
+                .output();
+            match compile {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound =>
+                    Err(missing_runtime_msg("Java", "javac")),
+                Err(e) => Err(format!("javac failed to launch: {e}")),
+                Ok(c) if !c.status.success() => Ok(c), // compile error -> show stderr
+                Ok(_) => Command::new("java")
+                    .current_dir(&work_dir)
+                    .arg(&class_name)
+                    .stdout(Stdio::piped()).stderr(Stdio::piped())
+                    .output()
+                    .map_err(|e| if e.kind() == std::io::ErrorKind::NotFound {
+                        missing_runtime_msg("Java", "java")
+                    } else {
+                        format!("java failed to launch: {e}")
+                    }),
+            }
+        }
+        "shell" | "sh" | "bash" => {
+            #[cfg(target_os = "windows")]
+            let res = Command::new("cmd").arg("/C").arg(&source)
+                .stdout(Stdio::piped()).stderr(Stdio::piped()).output()
+                .map_err(|e| format!("cmd failed: {e}"));
+            #[cfg(not(target_os = "windows"))]
+            let res = Command::new("bash").arg("-lc").arg(&source)
+                .stdout(Stdio::piped()).stderr(Stdio::piped()).output()
+                .map_err(|e| format!("bash failed: {e}"));
+            res
+        }
+        _ => {
+            let _ = fs::remove_dir_all(&work_dir);
+            return Err(format!("language '{language}' not supported. Try: python, javascript, java, shell."));
+        }
+    };
+
+    let _ = fs::remove_dir_all(&work_dir);
+
+    let output = match result {
+        Ok(o) => o,
+        Err(e) => return Err(e),
+    };
+
+    // Detect the Windows Microsoft-Store app-execution-alias stub:
+    // exit code 9009 with stderr mentioning the Store / App Installer.
+    let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
+    if output.status.code() == Some(9009)
+        || stderr_str.contains("Microsoft Store")
+        || stderr_str.contains("App Installer")
+    {
+        return Err(missing_runtime_msg(
+            match lang.as_str() {
+                "python" | "py" => "Python",
+                "javascript" | "js" | "node" => "Node.js",
+                "java" => "Java",
+                _ => "the runtime",
+            },
+            match lang.as_str() {
+                "python" | "py" => "py / python3",
+                "javascript" | "js" | "node" => "node",
+                "java" => "java",
+                _ => "command",
+            },
+        ));
+    }
+
+    Ok(RunOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: stderr_str,
+        exit_code: output.status.code(),
+        duration_ms: started.elapsed().as_millis(),
+    })
+}
+
+/// Tries a list of `(program, prefix-args)` candidates, appending the source
+/// path. Returns the first successful spawn. If every candidate is missing,
+/// returns a friendly install-guidance error.
+fn try_candidates(
+    candidates: &[(&str, &[&str])],
+    source_path: &std::path::Path,
+    label: &str,
+) -> Result<std::process::Output, String> {
+    use std::process::{Command, Stdio};
+    let mut last_err: Option<std::io::Error> = None;
+    for (prog, prefix) in candidates {
+        let mut cmd = Command::new(prog);
+        for a in *prefix { cmd.arg(a); }
+        cmd.arg(source_path).stdout(Stdio::piped()).stderr(Stdio::piped());
+        match cmd.output() {
+            Ok(o) => return Ok(o),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                last_err = Some(e);
+                continue;
+            }
+            Err(e) => return Err(format!("{prog} failed to launch: {e}")),
+        }
+    }
+    Err(missing_runtime_msg(label, &candidates.iter().map(|(p, _)| *p).collect::<Vec<_>>().join(" / "))
+        + &last_err.map(|e| format!(" (last error: {e})")).unwrap_or_default())
+}
+
+fn missing_runtime_msg(label: &str, tried: &str) -> String {
+    let install_hint = match label {
+        "Python" => "Install from https://www.python.org/downloads/ (on Windows pick 'Add python.exe to PATH' at the start of the installer). \
+                     If `python` opens the Microsoft Store instead of running, disable the alias under Settings → Apps → Advanced app settings → App execution aliases.",
+        "Node.js" => "Install from https://nodejs.org (LTS is fine). After install, restart this app so PATH is picked up.",
+        "Java" => "Install a JDK (e.g. https://adoptium.net). You need both `javac` and `java` on PATH.",
+        _ => "Install the runtime and make sure it is on PATH.",
+    };
+    format!(
+        "{label} runtime not found on PATH (tried: {tried}). {install_hint}"
+    )
+}
+
+fn extract_java_class(src: &str) -> Option<String> {
+    // Cheap regex-free scan: find "public class <Name>" or "class <Name>".
+    let needles = ["public class ", "class "];
+    for needle in needles {
+        if let Some(idx) = src.find(needle) {
+            let rest = &src[idx + needle.len()..];
+            let name: String = rest.chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if !name.is_empty() { return Some(name); }
+        }
+    }
+    None
+}
+
 // ---------- Commands: ollama ----------
 //
 // Talks to a local Ollama daemon at http://localhost:11434.
@@ -741,6 +945,7 @@ pub fn run() {
             quick_capture_save,
             ollama_health,
             ollama_generate,
+            run_code,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

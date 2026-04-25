@@ -9,7 +9,7 @@
 export type Block =
   | { id: string; kind: "paragraph"; text: string }
   | { id: string; kind: "heading"; level: 1 | 2 | 3; text: string }
-  | { id: string; kind: "image"; assetPath: string; alt?: string }
+  | { id: string; kind: "image"; assetPath: string; alt?: string; widthPct?: number }
   | { id: string; kind: "code"; language: string; code: string };
 
 export interface BlockDoc {
@@ -44,6 +44,7 @@ export function coerceDoc(raw: unknown, fileId: string): BlockDoc {
       out.push({
         id, kind: "image", assetPath: block.assetPath,
         alt: typeof block.alt === "string" ? block.alt : undefined,
+        widthPct: typeof block.widthPct === "number" ? Math.max(20, Math.min(100, block.widthPct)) : undefined,
       });
     } else if (block.kind === "code" && typeof block.code === "string") {
       out.push({

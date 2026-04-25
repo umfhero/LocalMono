@@ -1,6 +1,7 @@
 import { Check, Clock, Plus } from "lucide-react";
 import { colors } from "../theme/tokens";
 import { useStore } from "../store";
+import { urgencyOf, urgencyLabel, urgencyColor } from "../editor/taskUrgency";
 
 const sameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
@@ -10,12 +11,15 @@ export function TodayTasks() {
   const projectMap = Object.fromEntries(projects.map((p) => [p.id, p]));
 
   const today = new Date();
-  // Show: tasks due today + any pending overdue (so they don't disappear).
+  // Show: tasks due today + any pending overdue + any urgent (due tomorrow), so the
+  // widget actually previews what is bearing down on the user, not just today.
   const visible = tasks.filter((t) => {
+    if (t.status === "done" || t.status === "early") return false;
     const due = new Date(t.due);
     if (sameDay(due, today)) return true;
-    if (t.status === "pending" && due < today) return true;
-    return false;
+    if (due < today) return true;
+    const u = urgencyOf(t, today);
+    return u === "urgent"; // "TOMORROW"
   });
 
   const sorted = [...visible].sort((a, b) => new Date(a.due).getTime() - new Date(b.due).getTime());
@@ -78,6 +82,24 @@ export function TodayTasks() {
                   {proj.name}
                 </span>
               )}
+              {(() => {
+                const u = urgencyOf(t, today);
+                const label = urgencyLabel(u, t, today);
+                if (!label || done) return null;
+                const c = urgencyColor(u);
+                return (
+                  <span style={{
+                    fontSize: 9, fontWeight: 600,
+                    color: c, background: `${c}1f`,
+                    border: `1px solid ${c}55`,
+                    padding: "1px 5px", borderRadius: 3,
+                    letterSpacing: 0.4,
+                    flexShrink: 0,
+                  }}>
+                    {label}
+                  </span>
+                );
+              })()}
               <span style={{
                 display: "inline-flex", alignItems: "center", gap: 3,
                 color: missed ? colors.statusMissed : late ? colors.statusLate : colors.textDim,

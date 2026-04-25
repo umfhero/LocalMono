@@ -199,6 +199,19 @@ export async function readAsset(relPath: string): Promise<string> {
   return call<string>("read_asset", { relPath });
 }
 
+// ---------- Code execution ----------
+
+export interface RunOutput {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  durationMs: number;
+}
+
+export async function runCode(input: { language: string; source: string }): Promise<RunOutput> {
+  return call<RunOutput>("run_code", input);
+}
+
 // ---------- Ollama ----------
 
 export async function ollamaHealth(): Promise<boolean> {

@@ -12,10 +12,28 @@ import type { Project, Task, CalendarEvent } from "../api";
  * Tweak buildBriefingContext to change WHAT data the model sees. */
 
 export const BRIEFING_SYSTEM =
-  "You are a concise daily-briefing assistant for a single user. " +
-  "Write 2 short paragraphs (3-4 sentences total) summarising what is on their plate today. " +
-  "Mention specific project, task, and event names from the context verbatim. " +
-  "Do not use markdown, bullet points, headings, or preamble — only flowing prose.";
+  "You are a concise daily briefing assistant for a single user, writing in British English. " +
+  "The context lists TASKS (work items with deadlines) and EVENTS (timed appointments) separately. " +
+  "You MUST cover both tasks and events in your briefing, with explicit emphasis on tasks because they are the " +
+  "primary indicator of what the user actually has to do. Always mention specific task and event names verbatim, in quotes. " +
+  "" +
+  "Structure (in this exact order, three short paragraphs, 1 to 3 sentences each, no headings or labels): " +
+  "Paragraph 1, RECENT PROGRESS: things the user has completed in the last 7 days. " +
+  "Paragraph 2, WHAT'S NEXT: things coming up. Order them by urgency. Mention every URGENT task (due today or " +
+  "tomorrow). Mention every event happening today. Then mention APPROACHING tasks (due in 2 to 3 days). " +
+  "Then mention the most relevant SOON tasks (due in 4 to 7 days) and upcoming events this week. " +
+  "Paragraph 3, MISSED OR OVERDUE: anything the user has fallen behind on. " +
+  "" +
+  "Urgency rule: if the context labels a task as URGENT, your tone for that task must be direct and pressing " +
+  "(for example, 'is due today' or 'needs to be in by tomorrow'). For APPROACHING items, indicate the deadline is " +
+  "close (for example, 'due in three days, so probably worth starting today'). For SOON items, mention them more " +
+  "casually ('due later this week'). For tasks with deadlines beyond a week, mention them only if there are no more " +
+  "urgent items to talk about. " +
+  "" +
+  "If a section is empty, write one short sentence acknowledging that and move on. Never invent items not in the context. " +
+  "Forbidden characters and styles: hyphens, en dashes, em dashes, markdown, bullet points, asterisks, headings, " +
+  "code fences, bold, italics, preamble like 'Here is your briefing'. Use commas, semicolons, full stops, and the " +
+  "word 'and' to join ideas instead.";
 
 export function buildBriefingContext(
   projects: Project[],
@@ -26,62 +44,156 @@ export function buildBriefingContext(
   const startOfToday = new Date(now); startOfToday.setHours(0, 0, 0, 0);
   const endOfToday = new Date(now); endOfToday.setHours(23, 59, 59, 999);
   const weekAhead = new Date(now); weekAhead.setDate(weekAhead.getDate() + 7);
+  const twoWeeksAhead = new Date(now); twoWeeksAhead.setDate(twoWeeksAhead.getDate() + 14);
+  const weekBack = new Date(now); weekBack.setDate(weekBack.getDate() - 7);
 
-  const dueToday = tasks.filter((t) => {
-    if (t.status === "done" || t.status === "early") return false;
-    const due = new Date(t.due);
-    return due >= startOfToday && due <= endOfToday;
-  });
-  const overdue = tasks.filter((t) => {
-    if (t.status === "done" || t.status === "early") return false;
-    return new Date(t.due) < startOfToday;
-  });
-  const upcomingEvents = events
-    .filter((e) => {
-      const start = new Date(e.start);
-      return start >= startOfToday && start <= weekAhead;
-    })
+  const isDone = (t: Task) => t.status === "done" || t.status === "early";
+  const daysUntil = (iso: string): number => {
+    const due = new Date(iso); due.setHours(0, 0, 0, 0);
+    return Math.round((due.getTime() - startOfToday.getTime()) / 86400000);
+  };
+
+  // ---- Tasks bucketed by urgency tier ----
+  // Order matters: a task only appears in one bucket; check the most urgent first.
+  const openTasks = tasks.filter((t) => !isDone(t));
+
+  const overdue = openTasks
+    .filter((t) => daysUntil(t.due) < 0)
+    .sort((a, b) => new Date(a.due).getTime() - new Date(b.due).getTime());
+  const urgent = openTasks
+    .filter((t) => { const d = daysUntil(t.due); return d >= 0 && d <= 1; })
+    .sort((a, b) => new Date(a.due).getTime() - new Date(b.due).getTime());
+  const approaching = openTasks
+    .filter((t) => { const d = daysUntil(t.due); return d >= 2 && d <= 3; })
+    .sort((a, b) => new Date(a.due).getTime() - new Date(b.due).getTime());
+  const soon = openTasks
+    .filter((t) => { const d = daysUntil(t.due); return d >= 4 && d <= 7; })
+    .sort((a, b) => new Date(a.due).getTime() - new Date(b.due).getTime());
+  const later = openTasks
+    .filter((t) => { const d = daysUntil(t.due); return d >= 8 && d <= 14; })
+    .sort((a, b) => new Date(a.due).getTime() - new Date(b.due).getTime());
+  const horizon = openTasks
+    .filter((t) => daysUntil(t.due) > 14)
+    .sort((a, b) => new Date(a.due).getTime() - new Date(b.due).getTime())
+    .slice(0, 4);
+
+  const completedRecent = tasks
+    .filter((t) => t.completedAt && new Date(t.completedAt) >= weekBack)
+    .sort((a, b) => new Date(b.completedAt!).getTime() - new Date(a.completedAt!).getTime());
+
+  // ---- Events ----
+  const eventsToday = events
+    .filter((e) => { const s = new Date(e.start); return s >= startOfToday && s <= endOfToday; })
+    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+  const eventsThisWeek = events
+    .filter((e) => { const s = new Date(e.start).getTime(); return s > endOfToday.getTime() && s <= weekAhead.getTime(); })
     .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
     .slice(0, 6);
+  const eventsLater = events
+    .filter((e) => { const s = new Date(e.start).getTime(); return s > weekAhead.getTime() && s <= twoWeeksAhead.getTime(); })
+    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
+    .slice(0, 4);
+  // Recently-finished events that may have been missed
+  const threeDaysBack = new Date(now); threeDaysBack.setDate(threeDaysBack.getDate() - 3);
+  const recentEvents = events
+    .filter((e) => { const end = new Date(e.end); return end < startOfToday && end >= threeDaysBack; })
+    .sort((a, b) => new Date(b.start).getTime() - new Date(a.start).getTime());
 
   const activeProjects = projects.filter((p) => new Date(p.end).getTime() >= startOfToday.getTime());
+  const projectStats = activeProjects.map((p) => {
+    const projTasks = tasks.filter((t) => t.projectId === p.id);
+    const done = projTasks.filter(isDone).length;
+    return { p, total: projTasks.length, done };
+  });
 
-  const fmtDate = (iso: string) =>
-    new Date(iso).toLocaleString("en", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const fmtDateTime = (iso: string) =>
+    new Date(iso).toLocaleString("en-GB", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
   const fmtDay = (iso: string) =>
-    new Date(iso).toLocaleDateString("en", { month: "short", day: "numeric" });
+    new Date(iso).toLocaleDateString("en-GB", { weekday: "short", month: "short", day: "numeric" });
+  const projOf = (t: Task) => t.projectId ? projects.find((p) => p.id === t.projectId)?.name : null;
+  const taskLine = (t: Task, withDays = true) => {
+    const d = daysUntil(t.due);
+    const proj = projOf(t);
+    const dayPart = withDays
+      ? d < 0 ? ` (was due ${fmtDay(t.due)}, ${-d} day${-d === 1 ? "" : "s"} overdue)`
+        : d === 0 ? ` (due TODAY ${new Date(t.due).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })})`
+        : d === 1 ? ` (due TOMORROW)`
+        : ` (due ${fmtDay(t.due)}, in ${d} days)`
+      : "";
+    return `  - "${t.title}"${dayPart}${proj ? ` [project: "${proj}"]` : ""}`;
+  };
 
   const lines: string[] = [];
-  lines.push(`Today is ${now.toLocaleDateString("en", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}.`);
+  lines.push(`Today is ${now.toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}.`);
+  lines.push(`Open tasks total: ${openTasks.length}. Today's events: ${eventsToday.length}.`);
 
   lines.push("");
-  lines.push(`Active projects (${activeProjects.length}):`);
-  if (activeProjects.length === 0) lines.push("  (none)");
-  for (const p of activeProjects) {
-    lines.push(`  - "${p.name}" (${Math.round(p.activityPct * 100)}% activity, ends ${fmtDay(p.end)})`);
+  lines.push("# RECENT PROGRESS (use for paragraph 1)");
+  lines.push(`Tasks completed in the last 7 days (${completedRecent.length}):`);
+  if (completedRecent.length === 0) lines.push("  (none — say so briefly)");
+  for (const t of completedRecent.slice(0, 8)) {
+    const proj = projOf(t);
+    lines.push(`  - "${t.title}" finished ${fmtDay(t.completedAt!)}${proj ? ` [project: "${proj}"]` : ""}`);
   }
 
   lines.push("");
-  lines.push(`Tasks due today (${dueToday.length}):`);
-  if (dueToday.length === 0) lines.push("  (none)");
-  for (const t of dueToday) {
-    const proj = t.projectId ? projects.find((p) => p.id === t.projectId)?.name : null;
-    lines.push(`  - "${t.title}"${proj ? ` (project: ${proj})` : ""}`);
+  lines.push("# WHAT'S NEXT (use for paragraph 2 — order matters)");
+
+  lines.push(`URGENT tasks (due today or tomorrow, ${urgent.length}) — MUST mention every one:`);
+  if (urgent.length === 0) lines.push("  (none)");
+  for (const t of urgent) lines.push(taskLine(t));
+
+  lines.push(`Events happening today (${eventsToday.length}) — MUST mention every one:`);
+  if (eventsToday.length === 0) lines.push("  (none)");
+  for (const e of eventsToday) {
+    lines.push(`  - "${e.title}" at ${new Date(e.start).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}${e.location ? ` at ${e.location}` : ""}`);
   }
 
-  if (overdue.length > 0) {
-    lines.push("");
-    lines.push(`Overdue tasks (${overdue.length}):`);
-    for (const t of overdue.slice(0, 5)) {
-      lines.push(`  - "${t.title}" (was due ${fmtDay(t.due)})`);
-    }
+  lines.push(`APPROACHING tasks (due in 2 to 3 days, ${approaching.length}) — MUST mention every one:`);
+  if (approaching.length === 0) lines.push("  (none)");
+  for (const t of approaching) lines.push(taskLine(t));
+
+  lines.push(`SOON tasks (due in 4 to 7 days, ${soon.length}) — mention the most relevant:`);
+  if (soon.length === 0) lines.push("  (none)");
+  for (const t of soon) lines.push(taskLine(t));
+
+  lines.push(`Events upcoming this week (${eventsThisWeek.length}):`);
+  if (eventsThisWeek.length === 0) lines.push("  (none)");
+  for (const e of eventsThisWeek) {
+    lines.push(`  - "${e.title}" on ${fmtDateTime(e.start)}${e.location ? ` at ${e.location}` : ""}`);
+  }
+
+  lines.push(`LATER tasks (due in 8 to 14 days, ${later.length}) — only mention if more urgent items are absent:`);
+  if (later.length === 0) lines.push("  (none)");
+  for (const t of later.slice(0, 4)) lines.push(taskLine(t));
+
+  if (horizon.length > 0) {
+    lines.push(`HORIZON tasks (due beyond 14 days, ${horizon.length}) — mention only if everything else is empty:`);
+    for (const t of horizon) lines.push(taskLine(t));
+  }
+
+  if (eventsLater.length > 0) {
+    lines.push(`Events 8 to 14 days away (${eventsLater.length}):`);
+    for (const e of eventsLater) lines.push(`  - "${e.title}" on ${fmtDateTime(e.start)}`);
   }
 
   lines.push("");
-  lines.push(`Upcoming events (next 7 days, ${upcomingEvents.length}):`);
-  if (upcomingEvents.length === 0) lines.push("  (none)");
-  for (const e of upcomingEvents) {
-    lines.push(`  - "${e.title}" on ${fmtDate(e.start)}${e.location ? ` at ${e.location}` : ""}`);
+  lines.push("# MISSED OR OVERDUE (use for paragraph 3)");
+  lines.push(`Overdue tasks (${overdue.length}) — MUST mention every one with how late:`);
+  if (overdue.length === 0) lines.push("  (none — say so briefly)");
+  for (const t of overdue) lines.push(taskLine(t));
+
+  if (recentEvents.length > 0) {
+    lines.push(`Events that finished in the last 3 days (${recentEvents.length}):`);
+    for (const e of recentEvents.slice(0, 4)) lines.push(`  - "${e.title}" ended ${fmtDay(e.end)}`);
+  }
+
+  lines.push("");
+  lines.push("# PROJECT PROGRESS (background context, mention only if naturally relevant)");
+  if (projectStats.length === 0) lines.push("  (no active projects)");
+  for (const s of projectStats) {
+    const pct = s.total > 0 ? Math.round((s.done / s.total) * 100) : 0;
+    lines.push(`  - "${s.p.name}" ${s.done}/${s.total} tasks done (${pct}%), ends ${fmtDay(s.p.end)}`);
   }
 
   return lines.join("\n");

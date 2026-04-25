@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Sparkles, ChevronRight, RefreshCw, AlertTriangle } from "lucide-react";
 import { colors } from "../theme/tokens";
 import { mockBriefings } from "../mock/data";
@@ -52,8 +52,17 @@ export function Briefing() {
     }
   }, [model, context]);
 
-  // Auto-generate once on mount when conditions are right.
-  useEffect(() => { generate(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [model]);
+  // Auto-generate when the briefing context changes (task toggled, project added, event created, etc.).
+  // Debounced so a flurry of edits coalesces into one regeneration.
+  const regenTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (regenTimer.current) window.clearTimeout(regenTimer.current);
+    regenTimer.current = window.setTimeout(() => { generate(); }, 800);
+    return () => { if (regenTimer.current) window.clearTimeout(regenTimer.current); };
+    // We intentionally key off `context` (not `generate`) — the context string changes whenever
+    // a relevant store value changes, and `generate` itself depends on `context`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [context, model]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "2px 2px 4px" }}>

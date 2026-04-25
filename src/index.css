@@ -112,3 +112,22 @@ a { color: var(--accent); text-decoration: none; }
   color: var(--text-faint);
   pointer-events: none;
 }
+
+/* Block drag handle: faint at all times, fully visible on row hover or focus */
+.lm-block-handle { opacity: 0.35; }
+.lm-block-row:hover .lm-block-handle,
+.lm-block-handle:hover,
+.lm-block-handle:focus-visible { opacity: 1; color: var(--text-main); }
+.lm-block-handle:active { cursor: grabbing; }
+.lm-block-row[data-drag-over="true"] {
+  box-shadow: inset 0 2px 0 0 var(--accent);
+}
+
+/* Code-cell syntax highlighting (regex tokens from src/editor/highlight.ts) */
+.lm-syn-kw   { color: #c586c0; }
+.lm-syn-str  { color: #ce9178; }
+.lm-syn-com  { color: #6a9955; font-style: italic; }
+.lm-syn-num  { color: #b5cea8; }
+.lm-syn-fn   { color: #dcdcaa; }
+.lm-syn-type { color: #4ec9b0; }
+.lm-syn-txt  { color: var(--text-main); }

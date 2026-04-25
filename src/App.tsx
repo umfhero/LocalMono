@@ -182,7 +182,6 @@ function App() {
 
   return (
     <div style={{ display: "flex", height: "100vh", width: "100vw", backgroundColor: colors.bgMain, color: colors.textMain }}>
-      <Sidebar active={page} onChange={navigateTo} />
       <main style={{ flex: 1, minWidth: 0, height: "100vh", overflow: "hidden" }}>
         {page === "dashboard" && <Dashboard />}
         {page === "files" && (
@@ -198,6 +197,7 @@ function App() {
         {page === "events" && <EventsPage />}
         {page === "settings" && <SettingsPage />}
       </main>
+      <Sidebar active={page} onChange={navigateTo} />
 
       <QuickCapture open={captureOpen} onClose={handleCaptureClose} />
       <CreateProjectDialog open={createProject} onClose={() => setCreateProject(false)} />
