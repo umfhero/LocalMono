@@ -171,7 +171,8 @@ export function computeTrend(events: TrendEvent[], range: TrendRange): TrendPoin
     if (e.status === "done" || e.status === "early") y += 1;
     else if (e.status === "late") y -= 0.5;
     else if (e.status === "missed") y -= 1;
-    // pending: carry forward
+    // pending: predictive — assume completion (+1) so the line continues upward
+    else if (e.status === "pending") y += 1;
     pts.push({ x: i + 1, y, status: e.status, date: e.date });
   });
   return pts;

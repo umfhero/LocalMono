@@ -1,7 +1,19 @@
 import { useState, useMemo } from "react";
 import { ArrowUpRight } from "lucide-react";
 import { colors } from "../theme/tokens";
-import { mockTrendRaw, computeTrend, type TrendRange, type TrendPoint } from "../mock/data";
+import { mockTrendRaw, computeTrend, type TrendRange, type TrendPoint, type TrendEvent } from "../mock/data";
+import { useStore } from "../store";
+import type { Task } from "../api";
+
+function trendEventsFromTasks(tasks: Task[]): TrendEvent[] {
+  if (tasks.length === 0) return mockTrendRaw;
+  return tasks
+    .map((t) => ({
+      status: t.status,
+      date: t.completedAt ?? t.due,
+    }))
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+}
 
 const ranges: Array<{ key: TrendRange; label: string }> = [
   { key: "today", label: "Today" },
@@ -24,7 +36,9 @@ const isComplete = (s: TrendPoint["status"]) => s === "done" || s === "early" ||
 
 export function TaskTrendGraph() {
   const [range, setRange] = useState<TrendRange>("1m");
-  const points = useMemo(() => computeTrend(mockTrendRaw, range), [range]);
+  const { tasks } = useStore();
+  const events = useMemo(() => trendEventsFromTasks(tasks), [tasks]);
+  const points = useMemo(() => computeTrend(events, range), [events, range]);
 
   const stats = useMemo(() => {
     const counts = { done: 0, late: 0, missed: 0, early: 0, pending: 0 };
@@ -146,10 +160,18 @@ function Empty({ label }: { label: string }) {
   );
 }
 
+const fmtDate = (iso: string) =>
+  new Date(iso).toLocaleDateString("en", { day: "numeric", month: "short" });
+
+const tooltipFor = (p: TrendPoint) => {
+  if (p.status === "origin") return "Start";
+  return `${fmtDate(p.date)} · ${p.status} · score ${p.y}`;
+};
+
 function TrendSvg({ points }: { points: TrendPoint[] }) {
   const W = 600;
   const H = 200;
-  const padL = 28, padR = 12, padT = 10, padB = 24;
+  const padL = 24, padR = 8, padT = 8, padB = 22;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
 
@@ -218,21 +240,21 @@ function TrendSvg({ points }: { points: TrendPoint[] }) {
         );
       })}
 
-      {/* Dots */}
+      {/* Dots — wrapped in <g> so hover hit-area is bigger and tooltips work */}
       {points.map((p, i) => (
-        <circle
-          key={`dot-${i}`}
-          cx={x(p.x)} cy={y(p.y)}
-          r={p.status === "origin" ? 3.5 : isComplete(p.status) ? 4.5 : 3.5}
-          fill={statusColor[p.status]}
-          stroke={colors.bgCard}
-          strokeWidth={p.status === "origin" ? 1.5 : 2}
-          opacity={p.status === "origin" ? 0.7 : isPending(p.status) ? 0.7 : 1}
-        />
+        <g key={`dot-${i}`} style={{ cursor: "pointer" }}>
+          <title>{tooltipFor(p)}</title>
+          <circle cx={x(p.x)} cy={y(p.y)} r={9} fill="transparent" />
+          <circle
+            cx={x(p.x)} cy={y(p.y)}
+            r={p.status === "origin" ? 3.5 : isComplete(p.status) ? 4.5 : 3.5}
+            fill={statusColor[p.status]}
+            stroke={colors.bgCard}
+            strokeWidth={p.status === "origin" ? 1.5 : 2}
+            opacity={p.status === "origin" ? 0.7 : isPending(p.status) ? 0.7 : 1}
+          />
+        </g>
       ))}
-
-      <text x={padL} y={H - 2} fontSize={9} fill={colors.textFaint} fontFamily="var(--font-data)">Tasks</text>
-      <text x={6} y={padT + 8} fontSize={9} fill={colors.textFaint} fontFamily="var(--font-data)">Score</text>
     </svg>
   );
 }

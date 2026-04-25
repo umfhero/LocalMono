@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { LayoutDashboard, FolderKanban, FileText, Calendar, Settings, Plus } from "lucide-react";
+import { LayoutDashboard, FolderKanban, FileText, Calendar, Settings } from "lucide-react";
 import { colors } from "../theme/tokens";
 
 export type Page = "dashboard" | "projects" | "files" | "events" | "settings";
@@ -7,7 +7,6 @@ export type Page = "dashboard" | "projects" | "files" | "events" | "settings";
 interface Props {
   active: Page;
   onChange: (p: Page) => void;
-  onQuickCapture: () => void;
 }
 
 const items: Array<{ key: Page; icon: React.ReactNode; label: string }> = [
@@ -17,10 +16,10 @@ const items: Array<{ key: Page; icon: React.ReactNode; label: string }> = [
   { key: "events", icon: <Calendar size={18} />, label: "Events" },
 ];
 
-const COLLAPSED_W = 52;
-const EXPANDED_W = 176;
+const COLLAPSED_W = 48;
+const EXPANDED_W = 168;
 
-export function Sidebar({ active, onChange, onQuickCapture }: Props) {
+export function Sidebar({ active, onChange }: Props) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -33,36 +32,13 @@ export function Sidebar({ active, onChange, onQuickCapture }: Props) {
         borderRight: `1px solid ${colors.border}`,
         display: "flex",
         flexDirection: "column",
-        padding: "12px 8px",
+        padding: "12px 6px",
         gap: 2,
         flexShrink: 0,
         transition: "width 160ms cubic-bezier(0.2, 0, 0, 1)",
         overflow: "hidden",
       }}
     >
-      <button
-        onClick={onQuickCapture}
-        title="Quick capture (Ctrl+Shift+Space)"
-        style={{
-          height: 34, marginBottom: 8,
-          display: "flex", alignItems: "center", gap: 10,
-          padding: "0 10px",
-          color: colors.bgMain, backgroundColor: colors.accent,
-          borderRadius: 6, transition: "background-color 100ms",
-          overflow: "hidden",
-        }}
-        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.accentHover)}
-        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = colors.accent)}
-      >
-        <Plus size={16} strokeWidth={2.6} style={{ flexShrink: 0 }} />
-        <span style={{
-          fontSize: 12, fontWeight: 600, whiteSpace: "nowrap",
-          opacity: expanded ? 1 : 0, transition: "opacity 120ms",
-        }}>
-          Quick capture
-        </span>
-      </button>
-
       {items.map((it) => (
         <NavItem
           key={it.key}
